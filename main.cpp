@@ -188,6 +188,7 @@ struct projectile
         vel.z = 0.0;
         vel = vel * dt;
         this->d = this->d + vel.mag();
+        e.act(dt);
     }
 };
 
@@ -246,11 +247,18 @@ double get_time(void)
     return t;
 }
 
+#define FIRE_VEL 100.0
 void spawn_projectile(entity *src, std::vector<projectile> *proj_list, std::vector<renderable> *render_list)
 {
+    vector3d add_vel;
+    add_vel.x = 100.0 * cos(src->pos.z);
+    add_vel.y = 100.0 * sin(src->pos.z);
+
     projectile proj;
     proj.e = *src;
+    proj.e.vel.z = 0.0; // don't keep turning vel
     proj.e.acc = vector3d(); // don't keep acceleration
+    proj.e.vel = proj.e.vel + add_vel;
     proj_list->push_back(proj);
     render_list->push_back(renderable(&(proj_list->back().e), renderable::type::PROJECTILE));
 }
@@ -375,7 +383,7 @@ int main(int argc, char *argv[])
                 proj_render_it++;
             }
         }
-        printf("%0.2f: %0.2f, %0.2f, %0.2f\n", dt, player.vel.x, player.vel.y, player.vel.z);
+        //printf("%0.2f: %0.2f, %0.2f, %0.2f\n", dt, player.vel.x, player.vel.y, player.vel.z);
 
 
         // render final results
