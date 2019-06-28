@@ -159,13 +159,52 @@ void render_player(SDL_Renderer *renderer, const viewport &vp, vector3d pos)
     SDL_RenderDrawLines(renderer, points, 5);
 }
 
+void render_projectile(SDL_Renderer *renderer, const viewport &vp, vector3d pos)
+{
+    vector3d t; t.x =  5.0; t.y =  0.0;
+    vector3d b; t.x = -5.0; t.y =  0.0;
+    t = pos + t.rotate(pos.z);
+    b = pos + b.rotate(pos.z);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_Point points[2];
+    cart2sdl(vp, t, &points[0].x, &points[0].y);
+    cart2sdl(vp, b, &points[1].x, &points[1].y);
+    SDL_RenderDrawLines(renderer, points, 2);
+}
+
+struct projectile
+{
+    entity e;
+    double d;
+
+    projectile()
+    {
+        this->d = 0.0;
+    }
+
+    void act(double dt)
+    {
+        vector3d vel = e.vel;
+        vel.z = 0.0;
+        vel = vel * dt;
+        this->d = this->d + vel.mag();
+    }
+};
+
 struct renderable
 {
+    enum type
+    {
+        PLAYER,
+        PROJECTILE
+    };
     const entity *e;
+    type t;
 
-    renderable(const entity *e)
+    renderable(const entity *e, type t)
     {
         this->e = e;
+        this->t = t;
     }
 };
 
@@ -174,12 +213,17 @@ void render_flip(SDL_Renderer *renderer)
     SDL_RenderPresent(renderer);
 }
 
-void render(SDL_Renderer *renderer, const viewport &vp, std::vector<renderable> render_list)
+void render(SDL_Renderer *renderer, const viewport &vp, std::vector<renderable> *render_lists, int num_render_lists)
 {
     render_clear(renderer);
     render_background(renderer, vp);
-    for (renderable r:render_list) {
-        render_player(renderer, vp, r.e->pos);
+    for (int i = 0; i < num_render_lists; ++i) {
+        for (renderable &r : render_lists[i]) {
+            if (r.t == renderable::type::PLAYER)
+                render_player(renderer, vp, r.e->pos);
+            else if (r.t == renderable::type::PROJECTILE)
+                render_projectile(renderer, vp, r.e->pos);
+        }
     }
     render_flip(renderer);
 }
@@ -200,6 +244,15 @@ double get_time(void)
 {
     double t = ((double)SDL_GetTicks()) / 1000.0;
     return t;
+}
+
+void spawn_projectile(entity *src, std::vector<projectile> *proj_list, std::vector<renderable> *render_list)
+{
+    projectile proj;
+    proj.e = *src;
+    proj.e.acc = vector3d(); // don't keep acceleration
+    proj_list->push_back(proj);
+    render_list->push_back(renderable(&(proj_list->back().e), renderable::type::PROJECTILE));
 }
 
 #define F_ACC_MAG 100.0
@@ -257,13 +310,18 @@ int main(int argc, char *argv[])
     viewport vp(WINDOW_W, WINDOW_H);
     entity  player;
     control player_ctrl = CTRL_NONE;
-    std::vector<renderable> render_list;
-    render_list.push_back(renderable(&player));
-    render(renderer, vp, render_list);
+    std::vector<projectile> proj_list;
+    std::vector<renderable> render_lists[2];
+    std::vector<renderable> *ship_render_list = &render_lists[0];
+    std::vector<renderable> *proj_render_list = &render_lists[1];
+
+    ship_render_list->push_back(renderable(&player, renderable::type::PLAYER));
+    render(renderer, vp, render_lists, 2);
 
     SDL_Event event;
     double t = get_time();
     double t_new;
+    double t_fire = 0.0;
     double dt;
     while(1) {
         // event loop
@@ -285,17 +343,43 @@ int main(int argc, char *argv[])
             }
         }
 
+        // handle fire timer
+        if (player_ctrl == CTRL_FIRE) {
+            if (t - t_fire < 1.0) {
+                player_ctrl = CTRL_NONE;
+            } else {
+                t_fire = t;
+            }
+        }
+
         // process controls
         handle_controls(&player, player_ctrl);
+        if (player_ctrl == CTRL_FIRE) {
+            spawn_projectile(&player, &proj_list, proj_render_list);
+        }
 
         // act all entities
         player.act(dt);
         cap_vel(&player);
+        // todo optimization: reverse iterator
+        auto proj_it = proj_list.begin();
+        auto proj_render_it = proj_render_list->begin();
+        while (proj_it != proj_list.end()) {
+            proj_it->act(dt);
+            if (proj_it->d > 400.0) {
+                proj_it = proj_list.erase(proj_it);
+                proj_render_it = proj_render_list->erase(proj_render_it);
+            } else {
+                // only inc on else
+                proj_it++;
+                proj_render_it++;
+            }
+        }
         printf("%0.2f: %0.2f, %0.2f, %0.2f\n", dt, player.vel.x, player.vel.y, player.vel.z);
 
 
         // render final results
-        render(renderer, vp, render_list);
+        render(renderer, vp, render_lists, 2);
         SDL_Delay(20);
     }
 
